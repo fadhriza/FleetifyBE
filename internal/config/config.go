@@ -64,7 +64,7 @@ func LoadConfig() error {
 			log.Println("No .env file found, using system environment variables")
 		}
 	} else {
-		log.Printf("✅ Loaded configuration from %s", envFile)
+		log.Printf("SUCCESS: Loaded configuration from %s", envFile)
 	}
 
 	AppConfig = &Config{

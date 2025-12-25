@@ -7,12 +7,12 @@ import (
 )
 
 func LogError(context string, err error) {
-	log.Printf("\n❌ ERROR [%s]:\n", context)
+	log.Printf("\nERROR: ERROR [%s]:\n", context)
 	log.Printf("   Error: %v\n", err)
-	
+
 	stack := debug.Stack()
 	log.Printf("   Stack Trace:\n%s\n", string(stack))
-	
+
 	// wrapped errors
 	if err != nil {
 		log.Printf("   Full Error Chain:\n")
@@ -28,7 +28,7 @@ func LogError(context string, err error) {
 			depth++
 		}
 	}
-	
+
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
@@ -37,4 +37,3 @@ func LogErrorf(context string, format string, args ...interface{}) {
 	err := fmt.Errorf(format, args...)
 	LogError(context, err)
 }
-
