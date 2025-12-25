@@ -10,6 +10,8 @@ import (
 
 	"fleetify/internal/database"
 	"fleetify/pkg/errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Runner struct {
@@ -169,9 +171,20 @@ func (r *Runner) runMigration(migrationName string) error {
 	defer tx.Rollback(ctx)
 
 	sql := string(content)
-	if _, err := tx.Exec(ctx, sql); err != nil {
-		errors.LogError("Migration Execution Error", err)
-		return fmt.Errorf("failed to execute migration: %w", err)
+	statements := r.parseSQLStatements(sql)
+
+	if len(statements) > 0 {
+		fmt.Println("Executing SQL:")
+		for i, stmt := range statements {
+			r.displaySQLStatement(i+1, stmt)
+			result, err := tx.Exec(ctx, stmt)
+			if err != nil {
+				errors.LogError("Migration Execution Error", err)
+				return fmt.Errorf("failed to execute migration: %w", err)
+			}
+			r.displayPostgreSQLResponse(result)
+		}
+		fmt.Println()
 	}
 
 	if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (name) VALUES ($1)", migrationName); err != nil {
@@ -185,6 +198,62 @@ func (r *Runner) runMigration(migrationName string) error {
 
 	fmt.Printf("SUCCESS: Executed migration: %s\n", migrationName)
 	return nil
+}
+
+func (r *Runner) parseSQLStatements(sql string) []string {
+	lines := strings.Split(sql, "\n")
+	var statements []string
+	var currentStatement strings.Builder
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+
+		currentStatement.WriteString(line)
+		currentStatement.WriteString("\n")
+
+		if strings.HasSuffix(trimmed, ";") {
+			stmt := strings.TrimSpace(currentStatement.String())
+			if stmt != "" {
+				statements = append(statements, stmt)
+			}
+			currentStatement.Reset()
+		}
+	}
+
+	if currentStatement.Len() > 0 {
+		stmt := strings.TrimSpace(currentStatement.String())
+		if stmt != "" {
+			statements = append(statements, stmt)
+		}
+	}
+
+	return statements
+}
+
+func (r *Runner) displaySQLStatement(num int, stmt string) {
+	stmtLines := strings.Split(stmt, "\n")
+	for j, stmtLine := range stmtLines {
+		trimmed := strings.TrimSpace(stmtLine)
+		if trimmed == "" {
+			continue
+		}
+		if j == 0 {
+			fmt.Printf("  [%d] %s\n", num, trimmed)
+		} else {
+			fmt.Printf("      %s\n", trimmed)
+		}
+	}
+}
+
+func (r *Runner) displayPostgreSQLResponse(result pgconn.CommandTag) {
+	response := result.String()
+	if response != "" {
+		fmt.Printf("      → PostgreSQL: %s\n", response)
+	}
 }
 
 func (r *Runner) extractRollbackSQL(content string) string {

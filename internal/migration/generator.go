@@ -2,6 +2,9 @@ package migration
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,27 +23,51 @@ func NewGenerator() *Generator {
 	}
 }
 
-func (g *Generator) GenerateTable(tableName string) error {
+func (g *Generator) CreateTableModel(tableName string, needsSeeder bool) error {
 	if err := g.ensureDirectories(); err != nil {
 		return fmt.Errorf("failed to ensure directories: %w", err)
 	}
 
-	modelName := g.toPascalCase(tableName)
 	tableNameLower := strings.ToLower(tableName)
 	idFieldName := fmt.Sprintf("%s_id", tableNameLower)
-
-	timestamp := time.Now().Format("20060102150405")
-	migrationFileName := fmt.Sprintf("%s_%s_%s.sql", timestamp, tableNameLower, "create")
-
-	modelContent := g.generateModelContent(modelName, tableNameLower, idFieldName)
-	migrationContent := g.generateMigrationContent(tableNameLower, idFieldName)
-
 	modelPath := filepath.Join(g.modelsDir, fmt.Sprintf("%s.go", tableNameLower))
-	migrationPath := filepath.Join(g.migrationsDir, migrationFileName)
 
+	if _, err := os.Stat(modelPath); err == nil {
+		return fmt.Errorf("model already exists: %s", modelPath)
+	}
+
+	modelName := g.toPascalCase(tableName)
+	modelContent := g.generateModelContent(modelName, tableNameLower, idFieldName, needsSeeder)
 	if err := os.WriteFile(modelPath, []byte(modelContent), 0644); err != nil {
 		return fmt.Errorf("failed to write model file: %w", err)
 	}
+
+	return nil
+}
+
+func (g *Generator) GenerateSQLMigration(tableName string) error {
+	if err := g.ensureDirectories(); err != nil {
+		return fmt.Errorf("failed to ensure directories: %w", err)
+	}
+
+	tableNameLower := strings.ToLower(tableName)
+	idFieldName := fmt.Sprintf("%s_id", tableNameLower)
+	modelPath := filepath.Join(g.modelsDir, fmt.Sprintf("%s.go", tableNameLower))
+
+	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+		return fmt.Errorf("model file not found: %s. Create model first with: createtable %s", modelPath, tableName)
+	}
+
+	sqlColumns, err := g.GenerateSQLFromModel(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to generate SQL from model: %w", err)
+	}
+
+	timestamp := time.Now().Format("20060102150405")
+	migrationFileName := fmt.Sprintf("%s_%s_%s.sql", timestamp, tableNameLower, "create")
+	migrationPath := filepath.Join(g.migrationsDir, migrationFileName)
+
+	migrationContent := g.generateCreateMigrationFromModel(tableNameLower, idFieldName, sqlColumns)
 
 	if err := os.WriteFile(migrationPath, []byte(migrationContent), 0644); err != nil {
 		return fmt.Errorf("failed to write migration file: %w", err)
@@ -55,11 +82,22 @@ func (g *Generator) GenerateAlterTable(tableName string) error {
 	}
 
 	tableNameLower := strings.ToLower(tableName)
+	modelPath := filepath.Join(g.modelsDir, fmt.Sprintf("%s.go", tableNameLower))
+
+	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+		return fmt.Errorf("model file not found: %s. Create model first", modelPath)
+	}
+
+	sqlColumns, err := g.GenerateSQLFromModel(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to generate SQL from model: %w", err)
+	}
+
 	timestamp := time.Now().Format("20060102150405")
 	migrationFileName := fmt.Sprintf("%s_%s_%s.sql", timestamp, tableNameLower, "alter")
-
-	migrationContent := g.generateAlterMigrationContent(tableNameLower)
 	migrationPath := filepath.Join(g.migrationsDir, migrationFileName)
+
+	migrationContent := g.generateAlterMigrationFromModel(tableNameLower, sqlColumns)
 
 	if err := os.WriteFile(migrationPath, []byte(migrationContent), 0644); err != nil {
 		return fmt.Errorf("failed to write migration file: %w", err)
@@ -89,13 +127,22 @@ func (g *Generator) toPascalCase(s string) string {
 	return result.String()
 }
 
-func (g *Generator) generateModelContent(modelName, tableName, idFieldName string) string {
+func (g *Generator) generateModelContent(modelName, tableName, idFieldName string, needsSeeder bool) string {
 	idFieldNamePascal := g.toPascalCase(idFieldName)
-	return fmt.Sprintf(`package models
 
-import (
+	imports := `import (
 	"time"
-)
+)`
+	if needsSeeder {
+		imports = `import (
+	"fleetify/internal/migration"
+	"time"
+)`
+	}
+
+	baseContent := fmt.Sprintf(`package models
+
+%s
 
 // %s represents the %s table
 type %s struct {
@@ -139,7 +186,35 @@ func (%s) TableName() string {
 func (%s) GetID() string {
 	return "%s"
 }
-`, modelName, tableName, modelName, idFieldNamePascal, idFieldName, idFieldName, modelName, tableName, modelName, idFieldName)
+`, imports, modelName, tableName, modelName, idFieldNamePascal, idFieldName, idFieldName, modelName, tableName, modelName, idFieldName)
+
+	if needsSeeder {
+		seederContent := fmt.Sprintf(`
+
+func init() {
+	migration.RegisterSeeder("%s", func() interface{} {
+		return Seed%s()
+	})
+}
+
+// Seed%s seeds the %s table
+func Seed%s() []%s {
+	return []%s{
+		//set here
+		// Example seeder data:
+		// {
+		// 	%s: "uuid-here",
+		// 	FieldName: "value",
+		// 	CreatedTimestamp: time.Now(),
+		// 	UpdatedTimestamp: time.Now(),
+		// },
+	}
+}
+`, modelName, modelName, modelName, tableName, modelName, modelName, modelName, idFieldNamePascal)
+		return baseContent + seederContent
+	}
+
+	return baseContent
 }
 
 func (g *Generator) generateMigrationContent(tableName, idFieldName string) string {
@@ -280,4 +355,174 @@ func (g *Generator) generateAlterMigrationContent(tableName string) string {
 	result := strings.ReplaceAll(template, "{{TABLE_NAME}}", tableName)
 	result = strings.ReplaceAll(result, "{{TIMESTAMP}}", time.Now().Format(time.RFC3339))
 	return result
+}
+
+func (g *Generator) GenerateSQLFromModel(tableName string) (string, error) {
+	modelPath := filepath.Join(g.modelsDir, fmt.Sprintf("%s.go", strings.ToLower(tableName)))
+
+	src, err := os.ReadFile(modelPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read model file: %w", err)
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, modelPath, src, parser.ParseComments)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse model file: %w", err)
+	}
+
+	var columns []string
+	tableNameLower := strings.ToLower(tableName)
+	idFieldName := fmt.Sprintf("%s_id", tableNameLower)
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.StructType:
+			if x.Fields != nil {
+				for _, field := range x.Fields.List {
+					if field.Tag != nil {
+						tag := field.Tag.Value
+						colName, constraintsStr := extractDBTag(tag)
+						if colName == "" {
+							continue
+						}
+
+						fieldName := field.Names[0].Name
+						if fieldName == g.toPascalCase(idFieldName) {
+							continue
+						}
+						if fieldName == "CreatedTimestamp" || fieldName == "UpdatedTimestamp" {
+							continue
+						}
+
+						goType := getGoType(field.Type)
+						sqlType := goTypeToSQL(goType)
+						constraints := parseConstraints(constraintsStr)
+
+						colDef := fmt.Sprintf("\t%s %s%s", colName, sqlType, constraints)
+						columns = append(columns, colDef)
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	return strings.Join(columns, ",\n"), nil
+}
+
+func extractDBTag(tag string) (string, string) {
+	tag = strings.Trim(tag, "`")
+	parts := strings.Split(tag, " ")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "db:") {
+			value := strings.TrimPrefix(part, "db:")
+			value = strings.Trim(value, "\"")
+			if idx := strings.Index(value, ","); idx != -1 {
+				colName := value[:idx]
+				constraints := value[idx+1:]
+				return colName, constraints
+			}
+			return value, ""
+		}
+	}
+	return "", ""
+}
+
+func parseConstraints(constraintsStr string) string {
+	var constraints []string
+
+	if strings.Contains(constraintsStr, "notnull") {
+		constraints = append(constraints, " NOT NULL")
+	}
+	if strings.Contains(constraintsStr, "unique") {
+		constraints = append(constraints, " UNIQUE")
+	}
+
+	return strings.Join(constraints, "")
+}
+
+func getGoType(expr ast.Expr) string {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.SelectorExpr:
+		return fmt.Sprintf("%s.%s", x.X, x.Sel)
+	case *ast.MapType:
+		return "map"
+	case *ast.ArrayType:
+		return "array"
+	}
+	return "unknown"
+}
+
+func goTypeToSQL(goType string) string {
+	switch goType {
+	case "string":
+		return "TEXT"
+	case "int", "int8", "int16", "int32", "int64":
+		return "INTEGER"
+	case "uint", "uint8", "uint16", "uint32", "uint64":
+		return "INTEGER"
+	case "float32", "float64":
+		return "NUMERIC(10, 2)"
+	case "bool":
+		return "BOOLEAN"
+	case "time.Time":
+		return "TIMESTAMPTZ"
+	case "map":
+		return "JSONB"
+	default:
+		return "TEXT"
+	}
+}
+
+func (g *Generator) generateCreateMigrationFromModel(tableName, idFieldName, sqlColumns string) string {
+	return fmt.Sprintf(`-- Migration: Create table %s
+-- Generated at: %s
+-- Generated from model: internal/models/%s.go
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS %s (
+	%s UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+%s,
+	created_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	updated_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Add table and column comments
+COMMENT ON TABLE %s IS 'Table for %s';
+COMMENT ON COLUMN %s.%s IS 'Primary key UUID';
+COMMENT ON COLUMN %s.created_timestamp IS 'Record creation timestamp';
+COMMENT ON COLUMN %s.updated_timestamp IS 'Record update timestamp';
+
+-- Rollback
+-- DROP TABLE IF EXISTS %s;
+`, tableName, time.Now().Format(time.RFC3339), tableName, tableName, idFieldName, sqlColumns, tableName, tableName, tableName, idFieldName, tableName, tableName, tableName)
+}
+
+func (g *Generator) generateAlterMigrationFromModel(tableName, sqlColumns string) string {
+	lines := strings.Split(sqlColumns, "\n")
+	var alterStatements []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimSuffix(line, ",")
+		alterStatements = append(alterStatements, fmt.Sprintf("\tALTER TABLE %s ADD COLUMN IF NOT EXISTS %s;", tableName, line))
+	}
+
+	return fmt.Sprintf(`-- Migration: Alter table %s
+-- Generated at: %s
+-- Generated from model: internal/models/%s.go
+
+%s
+
+-- Rollback
+-- Customize rollback statements below (reverse the changes above):
+-- ALTER TABLE %s DROP COLUMN IF EXISTS column_name;
+`, tableName, time.Now().Format(time.RFC3339), tableName, strings.Join(alterStatements, "\n"), tableName)
 }

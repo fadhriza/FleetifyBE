@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -24,7 +25,13 @@ func main() {
 			log.Fatal("ERROR: Table name is required. Usage: go run cmd/migrate/main.go createtable <table_name>")
 		}
 		tableName := os.Args[2]
-		generateTable(tableName)
+		createTableModel(tableName)
+	case "generatesql":
+		if len(os.Args) < 3 {
+			log.Fatal("ERROR: Table name is required. Usage: go run cmd/migrate/main.go generatesql <table_name>")
+		}
+		tableName := os.Args[2]
+		generateSQLFromModel(tableName)
 	case "altertable":
 		if len(os.Args) < 3 {
 			log.Fatal("ERROR: Table name is required. Usage: go run cmd/migrate/main.go altertable <table_name>")
@@ -39,6 +46,12 @@ func main() {
 		}
 		migrationName := os.Args[2]
 		rollbackMigration(migrationName)
+	case "seed":
+		if len(os.Args) < 3 {
+			log.Fatal("ERROR: Table name is required. Usage: go run cmd/migrate/main.go seed <table_name>")
+		}
+		tableName := os.Args[2]
+		runSeeder(tableName)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -48,25 +61,60 @@ func main() {
 func printUsage() {
 	fmt.Println("Fleetify Migration Tool")
 	fmt.Println("Usage:")
-	fmt.Println("  go run cmd/migrate/main.go createtable <table_name>  - Generate a new table migration")
-	fmt.Println("  go run cmd/migrate/main.go altertable <table_name>   - Generate an alter table migration")
-	fmt.Println("  go run cmd/migrate/main.go migrate                   - Run pending migrations")
+	fmt.Println("  go run cmd/migrate/main.go createtable <table_name>  - Create model template")
+	fmt.Println("  go run cmd/migrate/main.go generatesql <table_name>   - Generate SQL migration from model")
+	fmt.Println("  go run cmd/migrate/main.go altertable <table_name>    - Generate ALTER migration from model")
+	fmt.Println("  go run cmd/migrate/main.go migrate                     - Run pending migrations")
 	fmt.Println("  go run cmd/migrate/main.go rollback <migration_name> - Rollback a migration")
+	fmt.Println("  go run cmd/migrate/main.go seed <table_name>           - Run seeders")
 }
 
-func generateTable(tableName string) {
+func createTableModel(tableName string) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Do you need dbseeds? [y/n]: ")
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatalf("Failed to read input: %v", err)
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	needsSeeder := answer == "y" || answer == "yes"
+
+	generator := migration.NewGenerator()
+	if err := generator.CreateTableModel(tableName, needsSeeder); err != nil {
+		log.Fatalf("Failed to create model: %v", err)
+	}
+
+	fmt.Printf("SUCCESS: Created model template: internal/models/%s.go\n", strings.ToLower(tableName))
+	if needsSeeder {
+		fmt.Printf("NOTE: Seeder template included in model\n")
+	}
+	fmt.Printf("NOTE: Edit the model, then run: go run cmd/migrate/main.go generatesql %s\n", tableName)
+}
+
+func runSeeder(tableName string) {
+	if err := config.LoadConfig(); err != nil {
+		log.Fatal("Failed to load config:", err)
+	}
+
+	runner := migration.NewSeeder()
+	if err := runner.RunSeeder(tableName); err != nil {
+		log.Fatalf("Failed to run seeder: %v", err)
+	}
+
+	fmt.Printf("SUCCESS: Seeder executed for: %s\n", tableName)
+}
+
+func generateSQLFromModel(tableName string) {
 	if err := config.LoadConfig(); err != nil {
 		log.Fatal("Failed to load config:", err)
 	}
 
 	generator := migration.NewGenerator()
-	if err := generator.GenerateTable(tableName); err != nil {
-		log.Fatalf("Failed to generate table: %v", err)
+	if err := generator.GenerateSQLMigration(tableName); err != nil {
+		log.Fatalf("Failed to generate SQL migration: %v", err)
 	}
 
-	fmt.Printf("SUCCESS: Successfully generated table migration for: %s\n", tableName)
-	fmt.Printf("NOTE: Model file: internal/models/%s.go\n", strings.ToLower(tableName))
-	fmt.Printf("NOTE: Migration file: migrations/%s_*.sql\n", strings.ToLower(tableName))
+	fmt.Printf("SUCCESS: Generated SQL migration from model: migrations/*_%s_create.sql\n", strings.ToLower(tableName))
 }
 
 func generateAlterTable(tableName string) {
