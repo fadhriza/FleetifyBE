@@ -36,4 +36,33 @@ func SetupRoutes(app *fiber.App) {
 	roles.Post("/", handlers.CreateRole)
 	roles.Put("/:oid", handlers.UpdateRole)
 	roles.Delete("/:oid", handlers.DeleteRole)
+
+	items := api.Group("/items", middleware.Auth())
+	items.Get("/", handlers.GetItems)
+	items.Get("/:id", handlers.GetItemById)
+	items.Post("/", handlers.CreateItem)
+	items.Put("/:id", handlers.UpdateItem)
+	items.Delete("/:id", handlers.DeleteItem)
+
+	suppliers := api.Group("/suppliers", middleware.Auth())
+	suppliers.Get("/", handlers.GetSuppliers)
+	suppliers.Get("/:id", handlers.GetSupplierById)
+	suppliers.Post("/", handlers.CreateSupplier)
+	suppliers.Put("/:id", handlers.UpdateSupplier)
+	suppliers.Delete("/:id", handlers.DeleteSupplier)
+
+	purchasings := api.Group("/purchasings", middleware.Auth())
+	purchasings.Get("/", handlers.GetPurchasings)
+	purchasings.Get("/:id", handlers.GetPurchasingById)
+	purchasings.Post("/", handlers.CreatePurchasing)
+	purchasings.Put("/:id", handlers.UpdatePurchasing)
+	purchasings.Delete("/:id", handlers.DeletePurchasing)
+
+	purchasingDetails := api.Group("/purchasing-details", middleware.Auth())
+	purchasingDetails.Get("/", handlers.GetPurchasingDetails)
+	purchasingDetails.Get("/purchasing/:purchasing_id", handlers.GetPurchasingDetailsByPurchasingId)
+	purchasingDetails.Get("/:id", handlers.GetPurchasingDetailById)
+	purchasingDetails.Post("/", handlers.CreatePurchasingDetail)
+	purchasingDetails.Put("/:id", handlers.UpdatePurchasingDetail)
+	purchasingDetails.Delete("/:id", handlers.DeletePurchasingDetail)
 }
