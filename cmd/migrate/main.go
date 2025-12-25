@@ -9,6 +9,7 @@ import (
 
 	"fleetify/internal/config"
 	"fleetify/internal/migration"
+	_ "fleetify/internal/models"
 )
 
 func main() {

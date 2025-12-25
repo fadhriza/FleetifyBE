@@ -6,13 +6,11 @@ import (
 )
 
 type Roles struct {
-
-	RoleOID string `db:"role_oid,notnull" json:"role_oid"`
-	RoleName string `db:"role_name,notnull" json:"role_name"`
+	RolesId         string `db:"roles_id" json:"roles_id"`
+	RoleOID         string `db:"role_oid,notnull" json:"role_oid"`
+	RoleName        string `db:"role_name,notnull" json:"role_name"`
 	RoleDescription string `db:"role_description" json:"role_description"`
 
-
-	// Timestamps
 	CreatedTimestamp time.Time `db:"created_timestamp" json:"created_timestamp"`
 	UpdatedTimestamp time.Time `db:"updated_timestamp" json:"updated_timestamp"`
 }
@@ -26,7 +24,6 @@ func (Roles) TableName() string {
 func (Roles) GetID() string {
 	return "roles_id"
 }
-
 
 func init() {
 	migration.RegisterSeeder("Roles", func() interface{} {

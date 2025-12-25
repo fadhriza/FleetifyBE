@@ -16,7 +16,7 @@ func Admin() fiber.Handler {
 			})
 		}
 
-		if claims.Role != "admin" {
+		if claims.Role != "ADMIN" {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"error":   true,
 				"message": "Admin access required",
