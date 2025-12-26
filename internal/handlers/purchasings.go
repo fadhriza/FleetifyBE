@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -13,9 +14,8 @@ import (
 )
 
 type PurchasingDetailRequest struct {
-	ItemId   int64   `json:"item_id" validate:"required"`
-	Qty      int     `json:"qty" validate:"required,gt=0"`
-	Subtotal float64 `json:"subtotal" validate:"required,gt=0"`
+	ItemId int64 `json:"item_id" validate:"required"`
+	Qty    int   `json:"qty" validate:"required,gt=0"`
 }
 
 type CreatePurchasingRequest struct {
@@ -31,7 +31,6 @@ type UpdatePurchasingRequest struct {
 	Date       *string `json:"date"`
 	SupplierId *int64  `json:"supplier_id"`
 	UserId     *int64  `json:"user_id"`
-	GrandTotal *float64 `json:"grand_total"`
 	Status     *string `json:"status"`
 	Notes      *string `json:"notes"`
 }
@@ -69,6 +68,8 @@ func GetPurchasings(c *fiber.Ctx) error {
 	var purchasings []PurchasingResponse
 	for rows.Next() {
 		var p PurchasingResponse
+		var supplierName sql.NullString
+		var userName sql.NullString
 		err := rows.Scan(
 			&p.Id,
 			&p.Date,
@@ -78,13 +79,15 @@ func GetPurchasings(c *fiber.Ctx) error {
 			&p.Status,
 			&p.Notes,
 			&p.CreatedAt,
-			&p.SupplierName,
-			&p.UserName,
+			&supplierName,
+			&userName,
 		)
 		if err != nil {
 			errors.LogError("Purchasing scan error", err)
 			continue
 		}
+		p.SupplierName = supplierName.String
+		p.UserName = userName.String
 
 		detailsQuery := `
 			SELECT id, purchasing_id, item_id, qty, subtotal
@@ -138,6 +141,8 @@ func GetPurchasingById(c *fiber.Ctx) error {
 	defer cancel()
 
 	var p PurchasingResponse
+	var supplierName sql.NullString
+	var userName sql.NullString
 	query := `
 		SELECT p.id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
 		       s.name as supplier_name, u.full_name as user_name
@@ -156,8 +161,8 @@ func GetPurchasingById(c *fiber.Ctx) error {
 		&p.Status,
 		&p.Notes,
 		&p.CreatedAt,
-		&p.SupplierName,
-		&p.UserName,
+		&supplierName,
+		&userName,
 	)
 
 	if err != nil {
@@ -166,6 +171,8 @@ func GetPurchasingById(c *fiber.Ctx) error {
 			"message": "Purchasing not found",
 		})
 	}
+	p.SupplierName = supplierName.String
+	p.UserName = userName.String
 
 	detailsQuery := `
 		SELECT id, purchasing_id, item_id, qty, subtotal
@@ -251,15 +258,16 @@ func CreatePurchasing(c *fiber.Ctx) error {
 
 	grandTotal := 0.0
 	for _, detail := range req.Details {
-		var itemExists int64
-		err = tx.QueryRow(ctx, "SELECT id FROM items WHERE id = $1", detail.ItemId).Scan(&itemExists)
+		var itemPrice float64
+		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", detail.ItemId).Scan(&itemPrice)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":   true,
 				"message": fmt.Sprintf("Item with ID %d not found", detail.ItemId),
 			})
 		}
-		grandTotal += detail.Subtotal
+		subtotal := itemPrice * float64(detail.Qty)
+		grandTotal += subtotal
 	}
 
 	status := "pending"
@@ -294,11 +302,21 @@ func CreatePurchasing(c *fiber.Ctx) error {
 	}
 
 	for _, detail := range req.Details {
+		var itemPrice float64
+		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", detail.ItemId).Scan(&itemPrice)
+		if err != nil {
+			errors.LogError("Item price query error", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   true,
+				"message": fmt.Sprintf("Failed to get price for item ID %d", detail.ItemId),
+			})
+		}
+		subtotal := itemPrice * float64(detail.Qty)
 		detailQuery := `
 			INSERT INTO purchasing_details (purchasing_id, item_id, qty, subtotal)
 			VALUES ($1, $2, $3, $4)
 		`
-		_, err = tx.Exec(ctx, detailQuery, purchasingId, detail.ItemId, detail.Qty, detail.Subtotal)
+		_, err = tx.Exec(ctx, detailQuery, purchasingId, detail.ItemId, detail.Qty, subtotal)
 		if err != nil {
 			errors.LogError("Purchasing detail creation error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -412,12 +430,6 @@ func UpdatePurchasing(c *fiber.Ctx) error {
 		}
 		updateFields = append(updateFields, fmt.Sprintf("user_id = $%d", argPos))
 		args = append(args, *req.UserId)
-		argPos++
-	}
-
-	if req.GrandTotal != nil {
-		updateFields = append(updateFields, fmt.Sprintf("grand_total = $%d", argPos))
-		args = append(args, *req.GrandTotal)
 		argPos++
 	}
 

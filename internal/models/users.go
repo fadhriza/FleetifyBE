@@ -7,6 +7,7 @@ import (
 
 type Users struct {
 	UsersId   string    `db:"users_id" json:"users_id"`
+	Id        int64     `db:"id" json:"id"`
 	Username  string    `db:"username,unique,notnull" json:"username"`
 	Password  string    `db:"password,notnull" json:"password"`
 	Role      string    `db:"role,notnull" json:"role"`

@@ -13,16 +13,14 @@ import (
 )
 
 type CreatePurchasingDetailRequest struct {
-	PurchasingId int64   `json:"purchasing_id" validate:"required"`
-	ItemId       int64   `json:"item_id" validate:"required"`
-	Qty          int     `json:"qty" validate:"required,gt=0"`
-	Subtotal     float64 `json:"subtotal" validate:"required,gt=0"`
+	PurchasingId int64 `json:"purchasing_id" validate:"required"`
+	ItemId       int64 `json:"item_id" validate:"required"`
+	Qty          int   `json:"qty" validate:"required,gt=0"`
 }
 
 type UpdatePurchasingDetailRequest struct {
-	ItemId   *int64   `json:"item_id"`
-	Qty      *int     `json:"qty"`
-	Subtotal *float64 `json:"subtotal"`
+	ItemId *int64 `json:"item_id"`
+	Qty    *int   `json:"qty"`
 }
 
 func GetPurchasingDetails(c *fiber.Ctx) error {
@@ -191,14 +189,16 @@ func CreatePurchasingDetail(c *fiber.Ctx) error {
 		})
 	}
 
-	var itemExists int64
-	err = database.DB.QueryRow(ctx, "SELECT id FROM items WHERE id = $1", req.ItemId).Scan(&itemExists)
+	var itemPrice float64
+	err = database.DB.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", req.ItemId).Scan(&itemPrice)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   true,
 			"message": "Item not found",
 		})
 	}
+
+	subtotal := itemPrice * float64(req.Qty)
 
 	query := `
 		INSERT INTO purchasing_details (purchasing_id, item_id, qty, subtotal)
@@ -211,7 +211,7 @@ func CreatePurchasingDetail(c *fiber.Ctx) error {
 		req.PurchasingId,
 		req.ItemId,
 		req.Qty,
-		req.Subtotal,
+		subtotal,
 	).Scan(
 		&detail.Id,
 		&detail.PurchasingId,
@@ -270,8 +270,13 @@ func UpdatePurchasingDetail(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingDetail models.PurchasingDetails
-	checkQuery := `SELECT id, purchasing_id FROM purchasing_details WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingDetail.Id, &existingDetail.PurchasingId)
+	checkQuery := `SELECT id, purchasing_id, item_id, qty FROM purchasing_details WHERE id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(
+		&existingDetail.Id,
+		&existingDetail.PurchasingId,
+		&existingDetail.ItemId,
+		&existingDetail.Qty,
+	)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -279,9 +284,8 @@ func UpdatePurchasingDetail(c *fiber.Ctx) error {
 		})
 	}
 
-	updateFields := []string{}
-	args := []interface{}{}
-	argPos := 1
+	itemId := existingDetail.ItemId
+	qty := existingDetail.Qty
 
 	if req.ItemId != nil {
 		var itemExists int64
@@ -292,9 +296,7 @@ func UpdatePurchasingDetail(c *fiber.Ctx) error {
 				"message": "Item not found",
 			})
 		}
-		updateFields = append(updateFields, fmt.Sprintf("item_id = $%d", argPos))
-		args = append(args, *req.ItemId)
-		argPos++
+		itemId = *req.ItemId
 	}
 
 	if req.Qty != nil {
@@ -304,20 +306,33 @@ func UpdatePurchasingDetail(c *fiber.Ctx) error {
 				"message": "Quantity must be greater than 0",
 			})
 		}
-		updateFields = append(updateFields, fmt.Sprintf("qty = $%d", argPos))
-		args = append(args, *req.Qty)
+		qty = *req.Qty
+	}
+
+	var itemPrice float64
+	err = database.DB.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", itemId).Scan(&itemPrice)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   true,
+			"message": "Item not found",
+		})
+	}
+
+	subtotal := itemPrice * float64(qty)
+
+	updateFields := []string{}
+	args := []interface{}{}
+	argPos := 1
+
+	if req.ItemId != nil {
+		updateFields = append(updateFields, fmt.Sprintf("item_id = $%d", argPos))
+		args = append(args, itemId)
 		argPos++
 	}
 
-	if req.Subtotal != nil {
-		if *req.Subtotal <= 0 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":   true,
-				"message": "Subtotal must be greater than 0",
-			})
-		}
-		updateFields = append(updateFields, fmt.Sprintf("subtotal = $%d", argPos))
-		args = append(args, *req.Subtotal)
+	if req.Qty != nil {
+		updateFields = append(updateFields, fmt.Sprintf("qty = $%d", argPos))
+		args = append(args, qty)
 		argPos++
 	}
 
@@ -328,13 +343,16 @@ func UpdatePurchasingDetail(c *fiber.Ctx) error {
 		})
 	}
 
+	updateFields = append(updateFields, fmt.Sprintf("subtotal = $%d", argPos))
+	args = append(args, subtotal)
+
 	args = append(args, id)
 	query := fmt.Sprintf(`
 		UPDATE purchasing_details
 		SET %s
 		WHERE id = $%d
 		RETURNING id, purchasing_id, item_id, qty, subtotal
-	`, strings.Join(updateFields, ", "), argPos)
+	`, strings.Join(updateFields, ", "), len(args))
 
 	var detail models.PurchasingDetails
 	err = database.DB.QueryRow(ctx, query, args...).Scan(
