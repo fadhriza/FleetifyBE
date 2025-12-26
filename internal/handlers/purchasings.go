@@ -11,6 +11,7 @@ import (
 	"fleetify/internal/database"
 	"fleetify/internal/models"
 	"fleetify/pkg/errors"
+	"fleetify/pkg/query"
 )
 
 type PurchasingDetailRequest struct {
@@ -46,16 +47,49 @@ func GetPurchasings(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	query := `
+	params := query.ParseQueryParams(c)
+	
+	searchFields := []string{"p.status", "p.notes", "s.name", "u.full_name"}
+	filterFields := map[string]string{
+		"status":      "p.status",
+		"supplier_id": "p.supplier_id",
+		"user_id":     "p.user_id",
+	}
+
+	whereClause, whereArgs := query.BuildWhereClause(params, searchFields, filterFields)
+	orderClause := query.BuildOrderClause(params, "p.created_at")
+	paginationClause, paginationArgs := query.BuildPaginationClause(params, len(whereArgs)+1)
+
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM purchasings p
+		LEFT JOIN suppliers s ON p.supplier_id = s.suppliers_id
+		LEFT JOIN users u ON p.user_id = u.users_id
+		%s
+	`, whereClause)
+
+	var totalCount int
+	err := database.DB.QueryRow(ctx, countQuery, whereArgs...).Scan(&totalCount)
+	if err != nil {
+		errors.LogError("Get purchasings count error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   true,
+			"message": "Failed to count purchasings",
+		})
+	}
+
+	baseQuery := `
 		SELECT p.purchasings_id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
 		       s.name as supplier_name, u.full_name as user_name
 		FROM purchasings p
 		LEFT JOIN suppliers s ON p.supplier_id = s.suppliers_id
 		LEFT JOIN users u ON p.user_id = u.users_id
-		ORDER BY p.created_at DESC
 	`
+	
+	fullQuery := baseQuery + " " + whereClause + " " + orderClause + " " + paginationClause
+	allArgs := append(whereArgs, paginationArgs...)
 
-	rows, err := database.DB.Query(ctx, query)
+	rows, err := database.DB.Query(ctx, fullQuery, allArgs...)
 	if err != nil {
 		errors.LogError("Get purchasings query error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -121,10 +155,15 @@ func GetPurchasings(c *fiber.Ctx) error {
 		})
 	}
 
+	response := query.NewPaginatedResponse(purchasings, totalCount, params.Page, params.Limit)
 	return c.JSON(fiber.Map{
 		"error": false,
-		"data":  purchasings,
-		"count": len(purchasings),
+		"data":  response.Data,
+		"count": response.Count,
+		"page":  response.Page,
+		"limit": response.Limit,
+		"total_pages": response.TotalPages,
+		"total_count": response.TotalCount,
 	})
 }
 

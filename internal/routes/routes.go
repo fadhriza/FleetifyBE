@@ -40,9 +40,9 @@ func SetupRoutes(app *fiber.App) {
 	items := api.Group("/items", middleware.Auth())
 	items.Get("/", handlers.GetItems)
 	items.Get("/:id", handlers.GetItemById)
-	items.Post("/", handlers.CreateItem)
-	items.Put("/:id", handlers.UpdateItem)
-	items.Delete("/:id", handlers.DeleteItem)
+	items.Post("/", middleware.ItemModifyAccess(), handlers.CreateItem)
+	items.Put("/:id", middleware.ItemModifyAccess(), handlers.UpdateItem)
+	items.Delete("/:id", middleware.ItemModifyAccess(), handlers.DeleteItem)
 
 	suppliers := api.Group("/suppliers", middleware.Auth())
 	suppliers.Get("/", handlers.GetSuppliers)

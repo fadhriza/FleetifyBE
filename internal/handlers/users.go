@@ -11,6 +11,7 @@ import (
 	"fleetify/internal/models"
 	"fleetify/pkg/errors"
 	"fleetify/pkg/password"
+	"fleetify/pkg/query"
 )
 
 type UpdateUserRequest struct {
@@ -29,13 +30,39 @@ func GetUsers(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	query := `
+	params := query.ParseQueryParams(c)
+	
+	searchFields := []string{"username", "full_name", "email", "phone"}
+	filterFields := map[string]string{
+		"role":      "role",
+		"is_active": "is_active",
+	}
+
+	whereClause, whereArgs := query.BuildWhereClause(params, searchFields, filterFields)
+	orderClause := query.BuildOrderClause(params, "created_at")
+	paginationClause, paginationArgs := query.BuildPaginationClause(params, len(whereArgs)+1)
+
+	countQuery := query.BuildCountQuery("users", whereClause)
+
+	var totalCount int
+	err := database.DB.QueryRow(ctx, countQuery, whereArgs...).Scan(&totalCount)
+	if err != nil {
+		errors.LogError("Get users count error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   true,
+			"message": "Failed to count users",
+		})
+	}
+
+	baseQuery := `
 		SELECT users_id, username, role, full_name, email, phone, is_active, created_at, updated_at
 		FROM users
-		ORDER BY created_at DESC
 	`
+	
+	fullQuery := baseQuery + " " + whereClause + " " + orderClause + " " + paginationClause
+	allArgs := append(whereArgs, paginationArgs...)
 
-	rows, err := database.DB.Query(ctx, query)
+	rows, err := database.DB.Query(ctx, fullQuery, allArgs...)
 	if err != nil {
 		errors.LogError("Get users query error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -74,10 +101,15 @@ func GetUsers(c *fiber.Ctx) error {
 		})
 	}
 
+	response := query.NewPaginatedResponse(users, totalCount, params.Page, params.Limit)
 	return c.JSON(fiber.Map{
 		"error": false,
-		"data":  users,
-		"count": len(users),
+		"data":  response.Data,
+		"count": response.Count,
+		"page":  response.Page,
+		"limit": response.Limit,
+		"total_pages": response.TotalPages,
+		"total_count": response.TotalCount,
 	})
 }
 

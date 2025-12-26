@@ -10,6 +10,7 @@ import (
 	"fleetify/internal/database"
 	"fleetify/internal/models"
 	"fleetify/pkg/errors"
+	"fleetify/pkg/query"
 )
 
 type CreatePurchasingDetailRequest struct {
@@ -27,13 +28,39 @@ func GetPurchasingDetails(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	query := `
+	params := query.ParseQueryParams(c)
+	
+	searchFields := []string{}
+	filterFields := map[string]string{
+		"purchasing_id": "purchasing_id",
+		"item_id":        "item_id",
+	}
+
+	whereClause, whereArgs := query.BuildWhereClause(params, searchFields, filterFields)
+	orderClause := query.BuildOrderClause(params, "purchasing_details_id")
+	paginationClause, paginationArgs := query.BuildPaginationClause(params, len(whereArgs)+1)
+
+	countQuery := query.BuildCountQuery("purchasing_details", whereClause)
+
+	var totalCount int
+	err := database.DB.QueryRow(ctx, countQuery, whereArgs...).Scan(&totalCount)
+	if err != nil {
+		errors.LogError("Get purchasing details count error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   true,
+			"message": "Failed to count purchasing details",
+		})
+	}
+
+	baseQuery := `
 		SELECT purchasing_details_id, purchasing_id, item_id, qty, subtotal
 		FROM purchasing_details
-		ORDER BY purchasing_details_id DESC
 	`
+	
+	fullQuery := baseQuery + " " + whereClause + " " + orderClause + " " + paginationClause
+	allArgs := append(whereArgs, paginationArgs...)
 
-	rows, err := database.DB.Query(ctx, query)
+	rows, err := database.DB.Query(ctx, fullQuery, allArgs...)
 	if err != nil {
 		errors.LogError("Get purchasing details query error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -68,10 +95,15 @@ func GetPurchasingDetails(c *fiber.Ctx) error {
 		})
 	}
 
+	response := query.NewPaginatedResponse(details, totalCount, params.Page, params.Limit)
 	return c.JSON(fiber.Map{
 		"error": false,
-		"data":  details,
-		"count": len(details),
+		"data":  response.Data,
+		"count": response.Count,
+		"page":  response.Page,
+		"limit": response.Limit,
+		"total_pages": response.TotalPages,
+		"total_count": response.TotalCount,
 	})
 }
 
