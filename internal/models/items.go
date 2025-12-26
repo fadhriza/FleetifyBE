@@ -6,7 +6,7 @@ import (
 )
 
 type Items struct {
-	Id        int64     `db:"id" json:"id"`
+	ItemsId   string    `db:"items_id" json:"items_id"`
 	Name      string    `db:"name,notnull" json:"name"`
 	Stock     int       `db:"stock" json:"stock"`
 	Price     float64   `db:"price,notnull" json:"price"`
@@ -22,7 +22,7 @@ func (Items) TableName() string {
 }
 
 func (Items) GetID() string {
-	return "id"
+	return "items_id"
 }
 
 func init() {

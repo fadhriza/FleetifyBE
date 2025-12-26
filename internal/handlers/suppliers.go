@@ -35,7 +35,7 @@ func GetSuppliers(c *fiber.Ctx) error {
 	defer cancel()
 
 	query := `
-		SELECT id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
+		SELECT suppliers_id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
 		FROM suppliers
 		ORDER BY created_at DESC
 	`
@@ -54,7 +54,7 @@ func GetSuppliers(c *fiber.Ctx) error {
 	for rows.Next() {
 		var supplier models.Suppliers
 		err := rows.Scan(
-			&supplier.Id,
+			&supplier.SuppliersId,
 			&supplier.Name,
 			&supplier.Email,
 			&supplier.Address,
@@ -100,13 +100,13 @@ func GetSupplierById(c *fiber.Ctx) error {
 
 	var supplier models.Suppliers
 	query := `
-		SELECT id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
+		SELECT suppliers_id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
 		FROM suppliers
-		WHERE id = $1
+		WHERE suppliers_id = $1
 	`
 
 	err := database.DB.QueryRow(ctx, query, id).Scan(
-		&supplier.Id,
+		&supplier.SuppliersId,
 		&supplier.Name,
 		&supplier.Email,
 		&supplier.Address,
@@ -158,7 +158,7 @@ func CreateSupplier(c *fiber.Ctx) error {
 	query := `
 		INSERT INTO suppliers (name, email, address, phone, supplier_type, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
+		RETURNING suppliers_id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
 	`
 
 	var supplier models.Suppliers
@@ -172,7 +172,7 @@ func CreateSupplier(c *fiber.Ctx) error {
 		now,
 		now,
 	).Scan(
-		&supplier.Id,
+		&supplier.SuppliersId,
 		&supplier.Name,
 		&supplier.Email,
 		&supplier.Address,
@@ -219,8 +219,8 @@ func UpdateSupplier(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingSupplier models.Suppliers
-	checkQuery := `SELECT id FROM suppliers WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingSupplier.Id)
+	checkQuery := `SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingSupplier.SuppliersId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -284,13 +284,13 @@ func UpdateSupplier(c *fiber.Ctx) error {
 	query := fmt.Sprintf(`
 		UPDATE suppliers
 		SET %s
-		WHERE id = $%d
-		RETURNING id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
+		WHERE suppliers_id = $%d
+		RETURNING suppliers_id, name, email, address, phone, supplier_type, is_active, created_at, updated_at
 	`, strings.Join(updateFields, ", "), argPos)
 
 	var supplier models.Suppliers
 	err = database.DB.QueryRow(ctx, query, args...).Scan(
-		&supplier.Id,
+		&supplier.SuppliersId,
 		&supplier.Name,
 		&supplier.Email,
 		&supplier.Address,
@@ -329,8 +329,8 @@ func DeleteSupplier(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingSupplier models.Suppliers
-	checkQuery := `SELECT id FROM suppliers WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingSupplier.Id)
+	checkQuery := `SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingSupplier.SuppliersId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -338,7 +338,7 @@ func DeleteSupplier(c *fiber.Ctx) error {
 		})
 	}
 
-	deleteQuery := `DELETE FROM suppliers WHERE id = $1`
+	deleteQuery := `DELETE FROM suppliers WHERE suppliers_id = $1`
 	_, err = database.DB.Exec(ctx, deleteQuery, id)
 	if err != nil {
 		errors.LogError("Supplier deletion error", err)

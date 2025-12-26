@@ -6,7 +6,7 @@ import (
 )
 
 type Suppliers struct {
-	Id           int64     `db:"id" json:"id"`
+	SuppliersId  string    `db:"suppliers_id" json:"suppliers_id"`
 	Name         string    `db:"name,notnull" json:"name"`
 	Email        string    `db:"email" json:"email"`
 	Address      string    `db:"address" json:"address"`
@@ -22,7 +22,7 @@ func (Suppliers) TableName() string {
 }
 
 func (Suppliers) GetID() string {
-	return "id"
+	return "suppliers_id"
 }
 
 func init() {

@@ -35,7 +35,7 @@ func GetItems(c *fiber.Ctx) error {
 	defer cancel()
 
 	query := `
-		SELECT id, name, stock, price, category, unit, min_stock, created_at, updated_at
+		SELECT items_id, name, stock, price, category, unit, min_stock, created_at, updated_at
 		FROM items
 		ORDER BY created_at DESC
 	`
@@ -54,7 +54,7 @@ func GetItems(c *fiber.Ctx) error {
 	for rows.Next() {
 		var item models.Items
 		err := rows.Scan(
-			&item.Id,
+			&item.ItemsId,
 			&item.Name,
 			&item.Stock,
 			&item.Price,
@@ -100,13 +100,13 @@ func GetItemById(c *fiber.Ctx) error {
 
 	var item models.Items
 	query := `
-		SELECT id, name, stock, price, category, unit, min_stock, created_at, updated_at
+		SELECT items_id, name, stock, price, category, unit, min_stock, created_at, updated_at
 		FROM items
-		WHERE id = $1
+		WHERE items_id = $1
 	`
 
 	err := database.DB.QueryRow(ctx, query, id).Scan(
-		&item.Id,
+		&item.ItemsId,
 		&item.Name,
 		&item.Stock,
 		&item.Price,
@@ -160,7 +160,7 @@ func CreateItem(c *fiber.Ctx) error {
 	query := `
 		INSERT INTO items (name, stock, price, category, unit, min_stock, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, name, stock, price, category, unit, min_stock, created_at, updated_at
+		RETURNING items_id, name, stock, price, category, unit, min_stock, created_at, updated_at
 	`
 
 	var item models.Items
@@ -174,7 +174,7 @@ func CreateItem(c *fiber.Ctx) error {
 		now,
 		now,
 	).Scan(
-		&item.Id,
+		&item.ItemsId,
 		&item.Name,
 		&item.Stock,
 		&item.Price,
@@ -221,8 +221,8 @@ func UpdateItem(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingItem models.Items
-	checkQuery := `SELECT id FROM items WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingItem.Id)
+	checkQuery := `SELECT items_id FROM items WHERE items_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingItem.ItemsId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -292,13 +292,13 @@ func UpdateItem(c *fiber.Ctx) error {
 	query := fmt.Sprintf(`
 		UPDATE items
 		SET %s
-		WHERE id = $%d
-		RETURNING id, name, stock, price, category, unit, min_stock, created_at, updated_at
+		WHERE items_id = $%d
+		RETURNING items_id, name, stock, price, category, unit, min_stock, created_at, updated_at
 	`, strings.Join(updateFields, ", "), argPos)
 
 	var item models.Items
 	err = database.DB.QueryRow(ctx, query, args...).Scan(
-		&item.Id,
+		&item.ItemsId,
 		&item.Name,
 		&item.Stock,
 		&item.Price,
@@ -337,8 +337,8 @@ func DeleteItem(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingItem models.Items
-	checkQuery := `SELECT id FROM items WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingItem.Id)
+	checkQuery := `SELECT items_id FROM items WHERE items_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingItem.ItemsId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -346,7 +346,7 @@ func DeleteItem(c *fiber.Ctx) error {
 		})
 	}
 
-	deleteQuery := `DELETE FROM items WHERE id = $1`
+	deleteQuery := `DELETE FROM items WHERE items_id = $1`
 	_, err = database.DB.Exec(ctx, deleteQuery, id)
 	if err != nil {
 		errors.LogError("Item deletion error", err)

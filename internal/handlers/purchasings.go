@@ -14,14 +14,14 @@ import (
 )
 
 type PurchasingDetailRequest struct {
-	ItemId int64 `json:"item_id" validate:"required"`
-	Qty    int   `json:"qty" validate:"required,gt=0"`
+	ItemId string `json:"item_id" validate:"required"`
+	Qty    int    `json:"qty" validate:"required,gt=0"`
 }
 
 type CreatePurchasingRequest struct {
 	Date       string                 `json:"date" validate:"required"`
-	SupplierId int64                  `json:"supplier_id" validate:"required"`
-	UserId     int64                  `json:"user_id" validate:"required"`
+	SupplierId string                `json:"supplier_id" validate:"required"`
+	UserId     string                `json:"user_id" validate:"required"`
 	Status     string                 `json:"status"`
 	Notes      string                 `json:"notes"`
 	Details    []PurchasingDetailRequest `json:"details" validate:"required,min=1"`
@@ -29,8 +29,8 @@ type CreatePurchasingRequest struct {
 
 type UpdatePurchasingRequest struct {
 	Date       *string `json:"date"`
-	SupplierId *int64  `json:"supplier_id"`
-	UserId     *int64  `json:"user_id"`
+	SupplierId *string `json:"supplier_id"`
+	UserId     *string `json:"user_id"`
 	Status     *string `json:"status"`
 	Notes      *string `json:"notes"`
 }
@@ -47,11 +47,11 @@ func GetPurchasings(c *fiber.Ctx) error {
 	defer cancel()
 
 	query := `
-		SELECT p.id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
+		SELECT p.purchasings_id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
 		       s.name as supplier_name, u.full_name as user_name
 		FROM purchasings p
-		LEFT JOIN suppliers s ON p.supplier_id = s.id
-		LEFT JOIN users u ON p.user_id = u.id
+		LEFT JOIN suppliers s ON p.supplier_id = s.suppliers_id
+		LEFT JOIN users u ON p.user_id = u.users_id
 		ORDER BY p.created_at DESC
 	`
 
@@ -71,7 +71,7 @@ func GetPurchasings(c *fiber.Ctx) error {
 		var supplierName sql.NullString
 		var userName sql.NullString
 		err := rows.Scan(
-			&p.Id,
+			&p.PurchasingsId,
 			&p.Date,
 			&p.SupplierId,
 			&p.UserId,
@@ -90,17 +90,17 @@ func GetPurchasings(c *fiber.Ctx) error {
 		p.UserName = userName.String
 
 		detailsQuery := `
-			SELECT id, purchasing_id, item_id, qty, subtotal
+			SELECT purchasing_details_id, purchasing_id, item_id, qty, subtotal
 			FROM purchasing_details
 			WHERE purchasing_id = $1
 		`
-		detailsRows, err := database.DB.Query(ctx, detailsQuery, p.Id)
+		detailsRows, err := database.DB.Query(ctx, detailsQuery, p.PurchasingsId)
 		if err == nil {
 			defer detailsRows.Close()
 			for detailsRows.Next() {
 				var detail models.PurchasingDetails
 				detailsRows.Scan(
-					&detail.Id,
+					&detail.PurchasingDetailsId,
 					&detail.PurchasingId,
 					&detail.ItemId,
 					&detail.Qty,
@@ -144,16 +144,16 @@ func GetPurchasingById(c *fiber.Ctx) error {
 	var supplierName sql.NullString
 	var userName sql.NullString
 	query := `
-		SELECT p.id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
+		SELECT p.purchasings_id, p.date, p.supplier_id, p.user_id, p.grand_total, p.status, p.notes, p.created_at,
 		       s.name as supplier_name, u.full_name as user_name
 		FROM purchasings p
-		LEFT JOIN suppliers s ON p.supplier_id = s.id
-		LEFT JOIN users u ON p.user_id = u.id
-		WHERE p.id = $1
+		LEFT JOIN suppliers s ON p.supplier_id = s.suppliers_id
+		LEFT JOIN users u ON p.user_id = u.users_id
+		WHERE p.purchasings_id = $1
 	`
 
 	err := database.DB.QueryRow(ctx, query, id).Scan(
-		&p.Id,
+		&p.PurchasingsId,
 		&p.Date,
 		&p.SupplierId,
 		&p.UserId,
@@ -175,7 +175,7 @@ func GetPurchasingById(c *fiber.Ctx) error {
 	p.UserName = userName.String
 
 	detailsQuery := `
-		SELECT id, purchasing_id, item_id, qty, subtotal
+		SELECT purchasing_details_id, purchasing_id, item_id, qty, subtotal
 		FROM purchasing_details
 		WHERE purchasing_id = $1
 	`
@@ -185,7 +185,7 @@ func GetPurchasingById(c *fiber.Ctx) error {
 		for detailsRows.Next() {
 			var detail models.PurchasingDetails
 			detailsRows.Scan(
-				&detail.Id,
+				&detail.PurchasingDetailsId,
 				&detail.PurchasingId,
 				&detail.ItemId,
 				&detail.Qty,
@@ -238,8 +238,8 @@ func CreatePurchasing(c *fiber.Ctx) error {
 		})
 	}
 
-	var supplierExists int64
-	err = tx.QueryRow(ctx, "SELECT id FROM suppliers WHERE id = $1", req.SupplierId).Scan(&supplierExists)
+	var supplierExists string
+	err = tx.QueryRow(ctx, "SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1", req.SupplierId).Scan(&supplierExists)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   true,
@@ -247,8 +247,8 @@ func CreatePurchasing(c *fiber.Ctx) error {
 		})
 	}
 
-	var userExists int64
-	err = tx.QueryRow(ctx, "SELECT id FROM users WHERE id = $1", req.UserId).Scan(&userExists)
+	var userExists string
+	err = tx.QueryRow(ctx, "SELECT users_id FROM users WHERE users_id = $1", req.UserId).Scan(&userExists)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   true,
@@ -259,11 +259,11 @@ func CreatePurchasing(c *fiber.Ctx) error {
 	grandTotal := 0.0
 	for _, detail := range req.Details {
 		var itemPrice float64
-		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", detail.ItemId).Scan(&itemPrice)
+		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE items_id = $1", detail.ItemId).Scan(&itemPrice)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":   true,
-				"message": fmt.Sprintf("Item with ID %d not found", detail.ItemId),
+				"message": fmt.Sprintf("Item with ID %s not found", detail.ItemId),
 			})
 		}
 		subtotal := itemPrice * float64(detail.Qty)
@@ -276,11 +276,11 @@ func CreatePurchasing(c *fiber.Ctx) error {
 	}
 
 	now := time.Now()
-	var purchasingId int64
+	var purchasingId string
 	insertQuery := `
 		INSERT INTO purchasings (date, supplier_id, user_id, grand_total, status, notes, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id
+		RETURNING purchasings_id
 	`
 
 	err = tx.QueryRow(ctx, insertQuery,
@@ -303,12 +303,12 @@ func CreatePurchasing(c *fiber.Ctx) error {
 
 	for _, detail := range req.Details {
 		var itemPrice float64
-		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE id = $1", detail.ItemId).Scan(&itemPrice)
+		err = tx.QueryRow(ctx, "SELECT price FROM items WHERE items_id = $1", detail.ItemId).Scan(&itemPrice)
 		if err != nil {
 			errors.LogError("Item price query error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   true,
-				"message": fmt.Sprintf("Failed to get price for item ID %d", detail.ItemId),
+				"message": fmt.Sprintf("Failed to get price for item ID %s", detail.ItemId),
 			})
 		}
 		subtotal := itemPrice * float64(detail.Qty)
@@ -336,12 +336,12 @@ func CreatePurchasing(c *fiber.Ctx) error {
 
 	var purchasing models.Purchasings
 	getQuery := `
-		SELECT id, date, supplier_id, user_id, grand_total, status, notes, created_at
+		SELECT purchasings_id, date, supplier_id, user_id, grand_total, status, notes, created_at
 		FROM purchasings
-		WHERE id = $1
+		WHERE purchasings_id = $1
 	`
 	database.DB.QueryRow(ctx, getQuery, purchasingId).Scan(
-		&purchasing.Id,
+		&purchasing.PurchasingsId,
 		&purchasing.Date,
 		&purchasing.SupplierId,
 		&purchasing.UserId,
@@ -379,8 +379,8 @@ func UpdatePurchasing(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingPurchasing models.Purchasings
-	checkQuery := `SELECT id FROM purchasings WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingPurchasing.Id)
+	checkQuery := `SELECT purchasings_id FROM purchasings WHERE purchasings_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingPurchasing.PurchasingsId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -406,8 +406,8 @@ func UpdatePurchasing(c *fiber.Ctx) error {
 	}
 
 	if req.SupplierId != nil {
-		var supplierExists int64
-		err = database.DB.QueryRow(ctx, "SELECT id FROM suppliers WHERE id = $1", *req.SupplierId).Scan(&supplierExists)
+		var supplierExists string
+		err = database.DB.QueryRow(ctx, "SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1", *req.SupplierId).Scan(&supplierExists)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":   true,
@@ -420,8 +420,8 @@ func UpdatePurchasing(c *fiber.Ctx) error {
 	}
 
 	if req.UserId != nil {
-		var userExists int64
-		err = database.DB.QueryRow(ctx, "SELECT id FROM users WHERE id = $1", *req.UserId).Scan(&userExists)
+		var userExists string
+		err = database.DB.QueryRow(ctx, "SELECT users_id FROM users WHERE users_id = $1", *req.UserId).Scan(&userExists)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":   true,
@@ -456,13 +456,13 @@ func UpdatePurchasing(c *fiber.Ctx) error {
 	query := fmt.Sprintf(`
 		UPDATE purchasings
 		SET %s
-		WHERE id = $%d
-		RETURNING id, date, supplier_id, user_id, grand_total, status, notes, created_at
+		WHERE purchasings_id = $%d
+		RETURNING purchasings_id, date, supplier_id, user_id, grand_total, status, notes, created_at
 	`, strings.Join(updateFields, ", "), argPos)
 
 	var purchasing models.Purchasings
 	err = database.DB.QueryRow(ctx, query, args...).Scan(
-		&purchasing.Id,
+		&purchasing.PurchasingsId,
 		&purchasing.Date,
 		&purchasing.SupplierId,
 		&purchasing.UserId,
@@ -500,8 +500,8 @@ func DeletePurchasing(c *fiber.Ctx) error {
 	defer cancel()
 
 	var existingPurchasing models.Purchasings
-	checkQuery := `SELECT id FROM purchasings WHERE id = $1`
-	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingPurchasing.Id)
+	checkQuery := `SELECT purchasings_id FROM purchasings WHERE purchasings_id = $1`
+	err := database.DB.QueryRow(ctx, checkQuery, id).Scan(&existingPurchasing.PurchasingsId)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   true,
@@ -509,7 +509,7 @@ func DeletePurchasing(c *fiber.Ctx) error {
 		})
 	}
 
-	deleteQuery := `DELETE FROM purchasings WHERE id = $1`
+	deleteQuery := `DELETE FROM purchasings WHERE purchasings_id = $1`
 	_, err = database.DB.Exec(ctx, deleteQuery, id)
 	if err != nil {
 		errors.LogError("Purchasing deletion error", err)
