@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"fleetify/internal/config"
 	"fleetify/internal/database"
 	"fleetify/internal/models"
 	"fleetify/pkg/errors"
 	"fleetify/pkg/query"
+	"fleetify/pkg/webhook"
 )
 
 type PurchasingDetailRequest struct {
@@ -389,6 +391,21 @@ func CreatePurchasing(c *fiber.Ctx) error {
 		&purchasing.Notes,
 		&purchasing.CreatedAt,
 	)
+
+	if config.AppConfig.Webhook.URL != "" {
+		webhookClient := webhook.NewClient(config.AppConfig.Webhook.URL)
+		webhookData := map[string]interface{}{
+			"purchasing_id": purchasing.PurchasingsId,
+			"date":          purchasing.Date,
+			"supplier_id":   purchasing.SupplierId,
+			"user_id":       purchasing.UserId,
+			"grand_total":   purchasing.GrandTotal,
+			"status":        purchasing.Status,
+			"notes":         purchasing.Notes,
+			"created_at":    purchasing.CreatedAt,
+		}
+		webhookClient.SendAsync(ctx, "purchasing.created", webhookData)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"error":   false,

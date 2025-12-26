@@ -14,6 +14,7 @@ type Config struct {
 	Database DatabaseConfig
 	JWT      JWTConfig
 	CORS     CORSConfig
+	Webhook  WebhookConfig
 }
 
 type ServerConfig struct {
@@ -46,6 +47,10 @@ type CORSConfig struct {
 	AllowedOrigins string
 	AllowedMethods string
 	AllowedHeaders string
+}
+
+type WebhookConfig struct {
+	URL string
 }
 
 var AppConfig *Config
@@ -89,6 +94,9 @@ func LoadConfig() error {
 			AllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5500"),
 			AllowedMethods: getEnv("CORS_ALLOWED_METHODS", "GET,POST,PUT,DELETE,PATCH,OPTIONS"),
 			AllowedHeaders: getEnv("CORS_ALLOWED_HEADERS", "Origin,Content-Type,Accept,Authorization"),
+		},
+		Webhook: WebhookConfig{
+			URL: getEnv("WEBHOOK_URL", ""),
 		},
 	}
 
